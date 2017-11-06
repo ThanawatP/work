@@ -465,25 +465,27 @@ func (c *Client) DeleteAllDeadJobs() error {
 }
 
 // DeleteScheduledJob deletes a job in the scheduled queue.
-func (c *Client) DeleteScheduledJob(scheduledFor int64, jobID string) error {
+func (c *Client) DeleteScheduledJob(scheduledFor int64, jobID string) (*Job, error) {
+	var job *Job
 	ok, jobBytes, err := c.deleteZsetJob(redisKeyScheduled(c.namespace), scheduledFor, jobID)
 	if err != nil {
-		return err
+		return job, err
 	}
 
 	// If we get a job back, parse it and see if it's a unique job. If it is, we need to delete the unique key.
 	if len(jobBytes) > 0 {
-		job, err := newJob(jobBytes, nil, nil)
+		var err error
+		job, err = newJob(jobBytes, nil, nil)
 		if err != nil {
 			logError("client.delete_scheduled_job.new_job", err)
-			return err
+			return job, err
 		}
 
 		if job.Unique {
 			uniqueKey, err := redisKeyUniqueJob(c.namespace, job.Name, job.Args)
 			if err != nil {
 				logError("client.delete_scheduled_job.redis_key_unique_job", err)
-				return err
+				return job, err
 			}
 			conn := c.pool.Get()
 			defer conn.Close()
@@ -491,15 +493,15 @@ func (c *Client) DeleteScheduledJob(scheduledFor int64, jobID string) error {
 			_, err = conn.Do("DEL", uniqueKey)
 			if err != nil {
 				logError("worker.delete_unique_job.del", err)
-				return err
+				return job, err
 			}
 		}
 	}
 
 	if !ok {
-		return ErrNotDeleted
+		return job, ErrNotDeleted
 	}
-	return nil
+	return job, nil
 }
 
 // DeleteRetryJob deletes a job in the retry queue.
